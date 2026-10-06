@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package pb.user;
+
+import "common/api.proto";
+import "google/protobuf/empty.proto";
+import "user/user_common.proto";
+
+option go_package = "github.com/MamangRust/monolith-point-of-sale-pb/users;users";
+
+service UserQueryService {
+    rpc FindAll(FindAllUserRequest) returns (ApiResponsePaginationUser);
+    rpc FindById(FindByIdUserRequest) returns (ApiResponseUser);
+    rpc FindByActive(FindAllUserRequest) returns (ApiResponsePaginationUserDeleteAt) {}
+    rpc FindByTrashed(FindAllUserRequest) returns (ApiResponsePaginationUserDeleteAt) {}
+    rpc FindByEmail(FindByEmailUserRequest) returns (ApiResponseUserWithPassword);
+    rpc FindByEmailAndVerify(FindByEmailUserRequest) returns (ApiResponseUserWithPassword);
+    rpc FindByVerificationCode(FindByVerificationCodeUserRequest) returns (ApiResponseUser);
+
+}

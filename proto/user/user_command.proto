@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package pb.user;
+
+import "common/api.proto";
+import "google/protobuf/empty.proto";
+import "user/user_common.proto";
+
+option go_package = "github.com/MamangRust/monolith-point-of-sale-pb/users;users";
+
+service UserCommandService {
+    rpc Create(CreateUserRequest) returns (ApiResponseUser);
+    rpc Update(UpdateUserRequest) returns (ApiResponseUser);
+    rpc TrashedUser(FindByIdUserRequest) returns (ApiResponseUserDeleteAt);
+    rpc RestoreUser(FindByIdUserRequest) returns (ApiResponseUserDeleteAt);
+    rpc DeleteUserPermanent(FindByIdUserRequest) returns (ApiResponseUserDelete);
+    rpc RestoreAllUser(google.protobuf.Empty) returns (ApiResponseUserAll){}
+    rpc DeleteAllUserPermanent(google.protobuf.Empty) returns (ApiResponseUserAll){}
+    rpc CreateUserRecord(CreateUserRecordRequest) returns (ApiResponseUser);
+    rpc UpdateUserIsVerified(UpdateUserIsVerifiedUserRequest) returns (ApiResponseUser);
+    rpc UpdateUserPassword(UpdateUserPasswordUserRequest) returns (ApiResponseUser);
+}

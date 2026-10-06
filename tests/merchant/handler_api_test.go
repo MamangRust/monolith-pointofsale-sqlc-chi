@@ -1,0 +1,172 @@
+package merchant_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	apierror "github.com/MamangRust/monolith-point-of-sale-apigateway/apierror"
+	apigateway "github.com/MamangRust/monolith-point-of-sale-apigateway/cache/gateway_cache"
+	gatewayhandler "github.com/MamangRust/monolith-point-of-sale-apigateway/handler"
+	httpx "github.com/MamangRust/monolith-point-of-sale-apigateway/httpx"
+	pbcompat "github.com/MamangRust/monolith-point-of-sale-apigateway/pbcompat"
+	"github.com/MamangRust/monolith-point-of-sale-shared/domain/requests"
+	response_api "github.com/MamangRust/monolith-point-of-sale-shared/mapper/response/api"
+	tests "github.com/MamangRust/monolith-point-of-sale-test"
+	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/suite"
+)
+
+type MerchantApiTestSuite struct {
+	tests.BaseTestSuite
+	router     chi.Router
+	merchantID int
+	userID     int
+}
+
+func (s *MerchantApiTestSuite) SetupSuite() {
+	s.BaseTestSuite.SetupSuite()
+	s.SetupUserService()
+	s.SetupMerchantService()
+
+	// Seed user
+	s.userID = s.SeedUser(context.Background())
+
+	s.router = chi.NewRouter()
+	s.router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r = r.WithContext(httpx.SetValue(r.Context(), "userID", fmt.Sprint(s.userID)))
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	apiHandler := apierror.NewApiHandler(s.Obs, s.Log)
+	merchantMapper := response_api.NewMerchantResponseMapper()
+	gatewayCache := apigateway.NewGatewayCache(s.GetCacheStore())
+	client := pbcompat.NewMerchantServiceClient(s.Conns["merchant"])
+
+	gatewayhandler.NewHandlerMerchant(
+		s.router,
+		client,
+		s.Log,
+		merchantMapper,
+		apiHandler,
+		gatewayCache,
+	)
+}
+
+func (s *MerchantApiTestSuite) TestMerchantApiLifecycle() {
+	// 1. Create
+	reqBody := requests.CreateMerchantRequest{
+		UserID:       s.userID,
+		Name:         "Test Merchant",
+		Description:  "Test Description",
+		Address:      "Test Address",
+		ContactEmail: "merchant@example.com",
+		ContactPhone: "123456789",
+		Status:       "active",
+	}
+	body, _ := json.Marshal(reqBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/merchant/create", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Require().Equal(http.StatusOK, rec.Code, rec.Body.String())
+	var res map[string]interface{}
+	json.Unmarshal(rec.Body.Bytes(), &res)
+	data := res["data"].(map[string]interface{})
+	s.Equal(reqBody.Name, data["name"])
+	s.merchantID = int(data["id"].(float64))
+
+	// 2. FindById
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/merchant/%d", s.merchantID), nil)
+	rec = httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Equal(http.StatusOK, rec.Code)
+	json.Unmarshal(rec.Body.Bytes(), &res)
+	data = res["data"].(map[string]interface{})
+	s.Equal(float64(s.merchantID), data["id"])
+
+	// 3. FindAll
+	req = httptest.NewRequest(http.MethodGet, "/api/merchant", nil)
+	rec = httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Equal(http.StatusOK, rec.Code)
+
+	// 4. FindByActive
+	req = httptest.NewRequest(http.MethodGet, "/api/merchant/active", nil)
+	rec = httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Equal(http.StatusOK, rec.Code)
+
+	// 5. Update
+	updateBody := requests.UpdateMerchantRequest{
+		MerchantID:   &s.merchantID,
+		UserID:       s.userID,
+		Name:         "Updated Merchant",
+		Description:  "Updated Description",
+		Address:      "Updated Address",
+		ContactEmail: "updated@example.com",
+		ContactPhone: "987654321",
+		Status:       "active",
+	}
+	body, _ = json.Marshal(updateBody)
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/merchant/update/%d", s.merchantID), bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Equal(http.StatusOK, rec.Code)
+	json.Unmarshal(rec.Body.Bytes(), &res)
+	data = res["data"].(map[string]interface{})
+	s.Equal(updateBody.Name, data["name"])
+
+	// 6. Trash
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/merchant/trashed/%d", s.merchantID), nil)
+	rec = httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Equal(http.StatusOK, rec.Code)
+
+	// 7. FindByTrashed
+	req = httptest.NewRequest(http.MethodGet, "/api/merchant/trashed", nil)
+	rec = httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Equal(http.StatusOK, rec.Code)
+
+	// 8. Restore
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/merchant/restore/%d", s.merchantID), nil)
+	rec = httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Equal(http.StatusOK, rec.Code)
+
+	// 9. DeletePermanent
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/merchant/trashed/%d", s.merchantID), nil)
+	rec = httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	req = httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/merchant/permanent/%d", s.merchantID), nil)
+	rec = httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Equal(http.StatusOK, rec.Code)
+
+	// 10. RestoreAll
+	req = httptest.NewRequest(http.MethodPost, "/api/merchant/restore/all", nil)
+	rec = httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Equal(http.StatusOK, rec.Code)
+
+	// 11. DeleteAll
+	req = httptest.NewRequest(http.MethodPost, "/api/merchant/permanent/all", nil)
+	rec = httptest.NewRecorder()
+	s.router.ServeHTTP(rec, req)
+	s.Equal(http.StatusOK, rec.Code)
+}
+
+func TestMerchantApiSuite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+	suite.Run(t, new(MerchantApiTestSuite))
+}
